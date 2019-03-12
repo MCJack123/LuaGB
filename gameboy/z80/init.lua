@@ -17,6 +17,10 @@ local apply_ld = require("gameboy/z80/ld")
 local apply_rl_rr_cb = require("gameboy/z80/rl_rr_cb")
 local apply_stack = require("gameboy/z80/stack")
 
+os.loadAPI("/LuaGB/gameboy/opcode_names.lua")
+local opcode_names_g = opcode_names.generate()
+--print(textutils.serialize(opcode_names))
+
 local Registers = require("gameboy/z80/registers")
 
 local Z80 = {}
@@ -182,7 +186,7 @@ function Z80.new(modules)
   -- halt
   opcodes[0x76] = function()
     --if interrupts_enabled == 1 then
-      --print("Halting!")
+      print("Halting!")
       z80.halted = 1
     --else
       --print("Interrupts not enabled! Not actually halting...")
@@ -191,6 +195,7 @@ function Z80.new(modules)
 
   -- stop
   opcodes[0x10] = function()
+    print(reg.pc)
     -- The stop opcode should always, for unknown reasons, be followed
     -- by an 0x00 data byte. If it isn't, this may be a sign that the
     -- emulator has run off the deep end, and this isn't a real STOP
@@ -226,18 +231,19 @@ function Z80.new(modules)
   -- di
   opcodes[0xF3] = function()
     interrupts.disable()
-    --print("Disabled interrupts with DI")
+    print("Disabled interrupts with DI")
   end
   -- ei
   opcodes[0xFB] = function()
     interrupts.enable()
-    --print("Enabled interrupts with EI")
+    print("Enabled interrupts with EI")
     z80.service_interrupt()
   end
 
   z80.service_interrupt = function()
     local fired = band(io.ram[0xFF], io.ram[0x0F])
     if fired ~= 0 then
+      print("Unhalting!")
       z80.halted = 0
       if interrupts.enabled ~= 0 then
         -- First, disable interrupts to prevent nesting routines (unless the program explicitly re-enables them later)
@@ -286,10 +292,17 @@ function Z80.new(modules)
     end
   end
 
+  local disfile = fs.open("/LuaGB/craftos-pc/disassembly.txt", "w")
+  --print(textutils.serialise(opcode_names_g))
+
   z80.process_instruction = function()
     --  If the processor is currently halted, then do nothing.
     if z80.halted == 0 then
       local opcode = read_byte(reg.pc)
+      local opname = opcode_names_g[band(opcode, 0xFF)] or "none"
+      --disfile.writeLine(string.format("0x%x: %s = 0x%x", reg.pc, opname, opcode))
+      disfile.flush()
+      --print("Running", opcode)
       -- Advance to one byte beyond the opcode
       reg.pc = band(reg.pc + 1, 0xFFFF)
       -- Run the instruction

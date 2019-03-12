@@ -3,7 +3,7 @@ require = dofile(shell.dir() .. "/require.lua")
 require.addPath(shell.dir())
 require.addPath(fs.getDir(shell.dir()))
 
-if pcall(require, "jit.opt") then
+if require("jit.opt") then
     require("jit.opt").start(
         "maxmcode=8192",
         "maxtrace=2000"
@@ -15,7 +15,7 @@ local bit32 = require("bit")
 local Gameboy = require("gameboy")
 local binser = require("vendor/binser")
 
-require("vendor/profiler")
+--require("vendor/profiler")
 
 local LuaGB = {}
 LuaGB.audio_dump_running = false
@@ -50,7 +50,8 @@ if type(jit) == "table" and jit.status() then
 end
 
 function LuaGB:setPalette()
-    for k,v in pairs(self.palette) do term.setPaletteColor(2^k, v.r, v.g, v.b) end
+    --print(textutils.serialize(self.palette))
+    for k,v in pairs(self.palette) do term.setPaletteColor(2^k, v.r / 256, v.g / 256, v.b / 256) end
 end
 
 function LuaGB:resize_window()
@@ -91,21 +92,23 @@ profile_enabled = false
 
 local function writeToFile(filename, data, size)
     size = size or string.len(data)
-    local file = fs.open(filename, "w")
+    local file = fs.open(shell.resolve(filename), "w")
+    if file == nil then return false end
     file.write(string.sub(data, 1, size))
     file.close()
     return true
 end
 local function appendToFile(filename, data, size)
     size = size or string.len(data)
-    local file = fs.open(filename, "a")
+    local file = fs.open(shell.resolve(filename), "a")
+    if file == nil then return false end
     file.write(string.sub(data, 1, size))
     file.close()
     return true
 end
 local function readFromFile(filename)
-    if not fs.exists(filename) then return false, "File doesn't exist" end
-    local file = fs.open(filename, "r")
+    if not fs.exists(shell.resolve(filename)) then return false, "File doesn't exist" end
+    local file = fs.open(shell.resolve(filename), "r")
     local retval = file.readAll()
     file.close()
     return retval, string.len(retval)
@@ -208,10 +211,19 @@ function LuaGB.dump_audio(buffer)
     appendToFile("audiodump.raw", output, 1024 * 2)
 end
 
+local function readBinaryFromFile(path)
+    local file = fs.open(shell.resolve(path), "rb")
+    local size = fs.getSize(shell.resolve(path))
+    local data = {}
+    for i = 0, size - 1 do data[i] = file.read() end
+    file.close()
+    return data, size
+end
+
 function LuaGB:load_game(game_path)
     self:reset()
 
-    local file_data, size = readFromFile(game_path)
+    local file_data, size = readBinaryFromFile(game_path)
     if file_data then
         self.game_path = game_path
         self.game_filename = fs.getName(game_path)
@@ -231,6 +243,7 @@ function LuaGB:load_game(game_path)
     self.menu_active = false
     self.emulator_running = true
     self.game_loaded = true
+    print(self.gameboy.memory.read_byte(0xFF))
 end
 
 function main(args)
@@ -263,7 +276,7 @@ function main(args)
         LuaGB:load_game(game_path)
     else error("Please specify a ROM to load.") end
 
-    LuaGB:toggle_panel("audio")
+    --LuaGB:toggle_panel("audio")
 
     --[[filebrowser.is_directory = fs.isDir
     filebrowser.get_directory_items = fs.list
@@ -310,11 +323,11 @@ function LuaGB:print_instructions()
     term.setGraphicsMode(true)
 end
 
+local draw_calls = 0
+local update_calls = 0
+
 function LuaGB:draw_game_screen(dx, dy, scale)
     local pixels = self.gameboy.graphics.game_screen
-    local image_data = self.game_screen_imagedata
-    local raw_image_data = self.raw_game_screen_imagedata
-    local stride = image_data:getWidth()
     self.palette = {}
     local c = 0
     for y = 0, 143 do
@@ -334,14 +347,17 @@ function LuaGB:draw_game_screen(dx, dy, scale)
             pixel.r = v_pixel[1]
             pixel.g = v_pixel[2]
             pixel.b = v_pixel[3]
+            --if pixel.r ~= 255 or pixel.g ~= 255 or pixel.b ~= 255 then print(textutils.serialize(pixel)) end
             local found = false
-            for k,v in pairs(self.palette) do if v == pixel then
-                found = true
-                term.setPixel(dx / scale + x, dy / scale + y, 2^k)
-            end end
+            for k,v in pairs(self.palette) do 
+                if v.r == pixel.r and v.g == pixel.g and v.b == pixel.b then
+                    found = true
+                    term.setPixel(x, y, 2^k)
+                end 
+            end
             if not found then
-                self.palette[c] = palette
-                term.setPixel(dx / scale + x, dy / scale + y, 2^c)
+                self.palette[c] = pixel
+                term.setPixel(x, y, 2^c)
                 c = c + 1
                 if c >= 16 then
                     term.setGraphicsMode(false)
@@ -350,6 +366,7 @@ function LuaGB:draw_game_screen(dx, dy, scale)
             end
         end
     end
+    draw_calls = draw_calls + 1
     self:setPalette()
 end
 
@@ -368,9 +385,9 @@ function LuaGB:reset()
     self.gameboy.graphics.palette_dmg_colors = palette
 
     -- Initialize Debug Panels
-    for _, panel in pairs(panels) do
-        panel.init(self.gameboy)
-    end
+    --for _, panel in pairs(panels) do
+    --    panel.init(self.gameboy)
+    --end
 end
 
 local action_keys = {}
@@ -440,7 +457,7 @@ action_keys.a = function()
         print("Stopped dumping audio.")
         LuaGB.audio_dump_running = false
     else
-        love.filesystem.remove("audiodump.raw")
+        --love.filesystem.remove("audiodump.raw")
         LuaGB.gameboy.audio.on_buffer_full(LuaGB.dump_audio)
         print("Started dumping audio to audiodump.raw ...")
         LuaGB.audio_dump_running = true
@@ -449,10 +466,10 @@ end
 
 action_keys.leftShift = function()
     if profile_enabled then
-        profilerStop()
+        --profilerStop()
         profile_enabled = false
     else
-        profilerStart()
+        --profilerStart()
         profile_enabled = true
     end
 end
@@ -517,8 +534,9 @@ function update()
         --filebrowser.update()
     else
         if LuaGB.emulator_running then
+            --LuaGB.gameboy:run_until_vblank()
             LuaGB.gameboy:run_until_vblank()
-        end
+        else os.queueEvent('terminate') end
     end
     if LuaGB.gameboy.cartridge.external_ram.dirty then
         LuaGB.save_delay = LuaGB.save_delay + 1
@@ -528,9 +546,9 @@ function update()
         LuaGB.gameboy.cartridge.external_ram.dirty = false
         LuaGB:save_ram()
     end
-
+    update_calls = update_calls + 1
     -- Apply any changed local settings to the gameboy
-    LuaGB.gameboy.graphics.palette.set_dmg_colors(filebrowser.palette[0], filebrowser.palette[1], filebrowser.palette[2], filebrowser.palette[3])
+    --LuaGB.gameboy.graphics.palette.set_dmg_colors(filebrowser.palette[0], filebrowser.palette[1], filebrowser.palette[2], filebrowser.palette[3])
 end
 
 function draw()
@@ -569,30 +587,47 @@ function draw()
 end
 
 function quit()
-    profilerReport("profiler.txt")
+    --profilerReport("profiler.txt")
     if LuaGB.game_loaded then
-        LuaGB:save_ram()
+        --LuaGB:save_ram()
     end
+    print(draw_calls)
+    print(update_calls)
 end
 
 main({"main.lua", ...})
-while (true) do
-    local ev, p1, p2, p3 = os.pullEventRaw()
-    if ev == "key" then
-        if p1 == keys.q then
+
+function event_loop()
+    while true do
+        local ev, p1, p2, p3 = os.pullEventRaw()
+        if ev == "key" then
+            if p1 == keys.q then
+                quit()
+                break
+            end
+            keypressed(keys.getName(p1))
+        elseif ev == "key_up" then
+            keyreleased(keys.getName(p1))
+        elseif ev == "terminate" then
             quit()
             break
+        elseif ev == "mouse_click" then
+            mousepressed(p2, p3, p1)
         end
-        keypressed(keys.getName(p1))
-    elseif ev == "key_up" then
-        keyreleased(keys.getName(p1))
-    elseif ev == "terminate" then
-        quit()
-        break
-    elseif ev == "mouse_click" then
-        mousepressed(p2, p3, p1)
     end
-    update()
-    draw()
 end
-    
+
+function update_loop()
+    while true do
+        os.pullEvent("update")
+        update()
+        draw()
+        os.queueEvent("update")
+    end
+end
+
+os.queueEvent("update")
+parallel.waitForAny(update_loop, event_loop)
+
+term.setGraphicsMode(false)
+print("")

@@ -1,4 +1,5 @@
-local opcode_names = {}
+function generate()
+opcode_names = {}
 
 opcode_names[0x00] = "nop"
 opcode_names[0x01] = "ld BC, d16"
@@ -272,4 +273,10 @@ opcode_names[0xFD] = "-- undefined --"
 opcode_names[0xFE] = "cp d8"
 opcode_names[0xFF] = "rst 0x38"
 
+_G.opcode_names = opcode_names
+_ENV.opcode_names = opcode_names
+
 return opcode_names
+end
+
+return generate

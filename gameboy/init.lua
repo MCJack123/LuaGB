@@ -88,10 +88,12 @@ function Gameboy:run_until_vblank()
     self:step()
     instructions = instructions + 1
   end
+  --print(self.processor.registers.pc)
   while self.io.ram[self.io.ports.LY] ~= 144 and instructions < 100000  do
     self:step()
     instructions = instructions + 1
   end
+  --print(self.processor.registers.pc)
   self.audio.update()
 end
 

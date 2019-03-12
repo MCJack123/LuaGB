@@ -24,7 +24,7 @@ function Memory.new(modules)
       print("Bad block, bailing", starting_high_byte, ending_high_byte)
       return
     end
-
+    print(string.format("Mapping addresses 0x%x00 to 0x%x00", starting_high_byte, ending_high_byte))
     --starting_address = starting_address or bit32.lshift(starting_high_byte, 8)
     for i = starting_high_byte, ending_high_byte do
       --block_map[bit32.lshift(i, 8)] = {start=starting_address, block=mapped_block}

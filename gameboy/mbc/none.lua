@@ -8,6 +8,7 @@ function MbcNone.new()
   mbc_none.external_ram = {}
   mbc_none.header = {}
   mbc_none.mt.__index = function(table, address)
+    if address == 0x101 then print(string.format("Reading from none MBC: 0x%x", mbc_none.raw_data[0x101])) end
     return mbc_none.raw_data[address]
   end
   mbc_none.mt.__newindex = function(table, address, value)

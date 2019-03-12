@@ -25,7 +25,14 @@ function require.addPath(str)
 end
 
 function require.require(api)
-    if api == "bit32" or api == "bit" then return bit end
+    if api == "bit32" or api == "bit" then 
+        local bit32 = bit
+        bit32.lshift = bit.blshift
+        bit32.rshift = bit.blogic_rshift
+        bit32.arshift = bit.brshift
+        function bit32.btest(...) return bit.band(...) ~= 0 end
+        return bit32
+    end
     for k,v in pairs(require_paths) do 
         if fs.exists(v .. "/" .. api .. ".lua") then return dofile(v .. "/" .. api .. ".lua")
         elseif fs.exists(v .. "/" .. api .. "/init.lua") then return dofile(v .. "/" .. api .. "/init.lua") end
@@ -33,5 +40,5 @@ function require.require(api)
     return nil
 end
 
-setmetatable(require, {__call = require.require})
+setmetatable(require, {__call = function(self, api) return require.require(api) end})
 return require
