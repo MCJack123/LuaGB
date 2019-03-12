@@ -1,9 +1,10 @@
 --os.loadAPI(shell.dir() .. "/require.lua")
-require = dofile(shell.dir() .. "/require.lua")
-require.addPath(shell.dir())
-require.addPath(fs.getDir(shell.dir()))
+--require = dofile(shell.dir() .. "/require.lua")
+--require.addPath(shell.dir())
+--require.addPath(fs.getDir(shell.dir()))
+package.path = package.path .. ";" .. shell.dir() .. "/?.lua;../?.lua;?/init.lua;../?/init.lua"
 
-if require("jit.opt") then
+if pcall(require, "jit.opt") then
     require("jit.opt").start(
         "maxmcode=8192",
         "maxtrace=2000"
