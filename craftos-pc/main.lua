@@ -2,11 +2,11 @@
 --require = dofile(shell.dir() .. "/require.lua")
 --require.addPath(shell.dir())
 --require.addPath(fs.getDir(shell.dir()))
-if term.getGraphicsMode == nil then error("This requires CraftOS-PC v1.2 or later.") end
-package.path = package.path .. ";" .. shell.dir() .. "/?.lua;../?.lua;?/init.lua;../?/init.lua"
+if term.drawPixels == nil then error("This requires CraftOS-PC v2.1 or later.") end
+package.path = package.path .. ";?.lua;../?.lua;?/init.lua;../?/init.lua"
 
-if pcall(require, "jit.opt") then
-    require("jit.opt").start(
+if jit and jit.opt then
+    jit.opt.start(
         "maxmcode=8192",
         "maxtrace=2000"
         --
@@ -53,7 +53,7 @@ end
 
 function LuaGB:setPalette()
     --print(textutils.serialize(self.palette))
-    for k,v in pairs(self.palette) do term.setPaletteColor(2^k, v.r / 256, v.g / 256, v.b / 256) end
+    for k,v in pairs(self.palette) do term.setPaletteColor(k, v.r / 256, v.g / 256, v.b / 256) end
 end
 
 function LuaGB:resize_window()
@@ -102,7 +102,7 @@ local function writeToFile(filename, data, size)
 end
 local function appendToFile(filename, data, size)
     size = size or string.len(data)
-    local file = fs.open(shell.resolve(filename), "a")
+    local file = fs.open(shell.resolve(filename), "ab")
     if file == nil then return false end
     file.write(string.sub(data, 1, size))
     file.close()
@@ -115,11 +115,35 @@ local function readFromFile(filename)
     file.close()
     return retval, string.len(retval)
 end
+local function writeBinaryToFile(filename, data, size)
+    size = size or string.len(data)
+    local file = fs.open(shell.resolve(filename), "wb")
+    if file == nil then return false end
+    for i = 1, size do file.write(string.byte(data, i, i)) end
+    file.close()
+    return true
+end
+local function readBinaryFromFile(path)
+    if not fs.exists(shell.resolve(path)) then return false, "File doesn't exist" end
+    local file = fs.open(shell.resolve(path), "rb")
+    local size = fs.getSize(shell.resolve(path))
+    local data = {}
+    for i = 0, size - 1 do data[i] = file.read() end
+    file.close()
+    return data, size
+end
 
 function LuaGB:save_ram()
+    print("Saving SRAM... (" .. #self.gameboy.cartridge.external_ram .. ")")
     local filename = "saves/" .. self.game_filename .. ".sav"
-    local save_data = binser.serialize(self.gameboy.cartridge.external_ram)
-    if writeToFile(filename, save_data) then
+    --local save_data = textutils.serialize(self.gameboy.cartridge.external_ram)
+    local save_data = ""
+    for i = 0, #self.gameboy.cartridge.external_ram do 
+        local v = self.gameboy.cartridge.external_ram[i]
+        if type(v) ~= "number" or v > 255 or v < -128 then error("Bad value " .. v) end
+        save_data = save_data .. string.char(v) 
+    end
+    if writeBinaryToFile(filename, save_data) then
         print("Successfully wrote SRAM to: ", filename)
     else
         print("Failed to save SRAM: ", filename)
@@ -128,16 +152,16 @@ end
 
 function LuaGB:load_ram()
     local filename = "saves/" .. self.game_filename .. ".sav"
-    local file_data, size = readFromFile(filename)
+    local file_data, size = readBinaryFromFile(filename)
     if type(size) == "string" then
         print(size)
         print("Couldn't load SRAM: ", filename)
     else
         if size > 0 then
-            local save_data, elements = binser.deserialize(file_data)
-            if elements > 0 then
-                for i = 0, #save_data[1] do
-                    self.gameboy.cartridge.external_ram[i] = save_data[1][i]
+            --local save_data, elements = binser.deserialize(file_data)
+            if #file_data > 0 then
+                for i = 0, #file_data do
+                    self.gameboy.cartridge.external_ram[i] = file_data[i]
                 end
                 print("Loaded SRAM: ", filename)
             else
@@ -180,20 +204,27 @@ function LuaGB:load_state(number)
     end
 end
 
-LuaGB.sound_buffer = nil
+LuaGB.sound_buffer = {}
+LuaGB.speaker = peripheral.find("speaker")
 
 function LuaGB.play_gameboy_audio(buffer)
-    return --[[ ComputerCraft has no audio
-    sound_buffer = love.sound.newSoundData(512, 32768, 16, 2)
-    for i = 0, 1024 - 1 do
-        sound_buffer:setSample(i, buffer[i])
+    if not LuaGB.speaker or not LuaGB.speaker.playLocalMusic then return end -- ComputerCraft has no audio
+    LuaGB.sound_buffer[#LuaGB.sound_buffer+1] = buffer
+    if #LuaGB.sound_buffer >= 4 then
+        local file, err = io.open("LuaGBAudioTmp.wav", "wb")
+        if file == nil then print("Could not write audio: " .. (err or "nil")) return end
+        file:write("RIFF\36\32\0\0WAVEfmt \16\0\0\0\1\0\2\0\0\128\0\0\0\0\2\0\4\0\16\0data\0\32\0\0")
+        for j = 1, 4 do
+            for i = 0, 1023 do
+                local n = LuaGB.sound_buffer[j][i] * 32767
+                file:write(string.char(bit32.band(n, 0xFF)) .. string.char(bit32.band(bit32.rshift(n, 8), 0xFF)))
+            end
+        end
+        file:close()
+        LuaGB.speaker.playLocalMusic("LuaGBAudioTmp.wav")
+        LuaGB.sound_buffer = {}
     end
-    --local source = love.audio.newSource(LuaGB.sound_buffer)
-    --love.audio.play(source)
-    LuaGB.queueable_source:queue(sound_buffer)
-    if not LuaGB.queueable_source:isPlaying() then
-        LuaGB.queueable_source:play()
-    end]]
+    --print("Audio success")
 end
 
 function LuaGB.dump_audio(buffer)
@@ -203,23 +234,13 @@ function LuaGB.dump_audio(buffer)
     local output = ""
     local chars = {}
     for i = 0, 1024 - 1 do
-        local sample = buffer[i]
-        sample = math.floor(sample * (32768 - 1)) -- re-root in 16-bit range
+        local sample = math.floor(buffer[i] * 32767) -- re-root in 16-bit range
         chars[i * 2] = string.char(bit32.band(sample, 0xFF))
         chars[i * 2 + 1] = string.char(bit32.rshift(bit32.band(sample, 0xFF00), 8))
     end
     output = table.concat(chars)
 
     appendToFile("audiodump.raw", output, 1024 * 2)
-end
-
-local function readBinaryFromFile(path)
-    local file = fs.open(shell.resolve(path), "rb")
-    local size = fs.getSize(shell.resolve(path))
-    local data = {}
-    for i = 0, size - 1 do data[i] = file.read() end
-    file.close()
-    return data, size
 end
 
 function LuaGB:load_game(game_path)
@@ -284,7 +305,8 @@ function main(args)
     filebrowser.get_directory_items = fs.list
     filebrowser.load_file = function(filename) LuaGB:load_game(filename) end
     filebrowser.init(LuaGB.gameboy)--]]
-    term.setGraphicsMode(true)
+    term.setGraphicsMode(2)
+    term.clear()
     LuaGB:resize_window()
 end
 
@@ -322,17 +344,124 @@ function LuaGB:print_instructions()
     end
     --love.graphics.pop()
     os.pullEvent("char")
-    term.setGraphicsMode(true)
+    term.setGraphicsMode(2)
 end
 
 local draw_calls = 0
 local update_calls = 0
 
+local fpsCharacters = {
+    ["0"] = {
+        "\255\255\255\254",
+        "\255\254\255\254",
+        "\255\254\255\254",
+        "\255\254\255\254",
+        "\255\255\255\254"
+    },
+    ["1"] = {
+        "\254\255\254\254\254",
+        "\254\255\254\254\254",
+        "\254\255\254\254\254",
+        "\254\255\254\254\254",
+        "\254\255\254\254\254",
+    },
+    ["2"] = {
+        "\255\255\255\254",
+        "\254\254\255\254",
+        "\255\255\255\254",
+        "\255\254\254\254",
+        "\255\255\255\254",
+    },
+    ["3"] = {
+        "\255\255\255\254",
+        "\254\254\255\254",
+        "\255\255\255\254",
+        "\254\254\255\254",
+        "\255\255\255\254",
+    },
+    ["4"] = {
+        "\255\254\255\254",
+        "\255\254\255\254",
+        "\255\255\255\254",
+        "\254\254\255\254",
+        "\254\254\255\254",
+    },
+    ["5"] = {
+        "\255\255\255\254",
+        "\255\254\254\254",
+        "\255\255\255\254",
+        "\254\254\255\254",
+        "\255\255\255\254",
+    },
+    ["6"] = {
+        "\255\255\255\254",
+        "\255\254\254\254",
+        "\255\255\255\254",
+        "\255\254\255\254",
+        "\255\255\255\254",
+    },
+    ["7"] = {
+        "\255\255\255\254",
+        "\254\254\255\254",
+        "\254\254\255\254",
+        "\254\254\255\254",
+        "\254\254\255\254",
+    },
+    ["8"] = {
+        "\255\255\255\254",
+        "\255\254\255\254",
+        "\255\255\255\254",
+        "\255\254\255\254",
+        "\255\255\255\254",
+    },
+    ["9"] = {
+        "\255\255\255\254",
+        "\255\254\255\254",
+        "\255\255\255\254",
+        "\254\254\255\254",
+        "\255\255\255\254",
+    },
+    [" "] = {
+        "\254\254\254\254",
+        "\254\254\254\254",
+        "\254\254\254\254",
+        "\254\254\254\254",
+        "\254\254\254\254",
+    },
+    ["F"] = {
+        "\255\255\255\254",
+        "\255\254\254\254",
+        "\255\255\255\254",
+        "\255\254\254\254",
+        "\255\254\254\254",
+    },
+    ["P"] = {
+        "\255\255\255\254",
+        "\255\254\255\254",
+        "\255\255\255\254",
+        "\255\254\254\254",
+        "\255\254\254\254",
+    },
+    ["S"] = {
+        "\254\255\255\254",
+        "\255\254\254\254",
+        "\254\255\254\254",
+        "\254\254\255\254",
+        "\255\255\254\254",
+    },
+}
+
+local lastFrameUpdate, frameCount = math.floor(os.epoch("utc") / 1000), 0
+local lastDraw = os.epoch("utc")
+
 function LuaGB:draw_game_screen(dx, dy, scale)
+    ---[=[
     local pixels = self.gameboy.graphics.game_screen
     self.palette = {}
     local c = 0
+    local screen = {}
     for y = 0, 143 do
+        local row, pix_row = {}, pixels[y]
         for x = 0, 159 do
             --[[if raw_image_data then
                 local pixel = raw_image_data[y*stride+x]
@@ -345,7 +474,8 @@ function LuaGB:draw_game_screen(dx, dy, scale)
                 image_data:setPixel(x, y, pixels[y][x][1], pixels[y][x][2], pixels[y][x][3], 255)
             end]]
             local pixel = {}
-            local v_pixel = pixels[y][x]
+            local v_pixel = pix_row[x]
+            
             pixel.r = v_pixel[1]
             pixel.g = v_pixel[2]
             pixel.b = v_pixel[3]
@@ -354,22 +484,38 @@ function LuaGB:draw_game_screen(dx, dy, scale)
             for k,v in pairs(self.palette) do 
                 if v.r == pixel.r and v.g == pixel.g and v.b == pixel.b then
                     found = true
-                    term.setPixel(x, y, 2^k)
+                    --term.setPixel(x, y, k)
+                    row[x+1] = k
                 end 
             end
             if not found then
                 self.palette[c] = pixel
-                term.setPixel(x, y, 2^c)
+                --term.setPixel(x, y, c)
+                row[x+1] = c
                 c = c + 1
-                if c >= 16 then
+                if c == 15 then c = 16 end
+                if c >= 256 then
                     term.setGraphicsMode(false)
                     error("Too many colors on-screen")
                 end
             end
         end
+        screen[y+1] = row
     end
-    draw_calls = draw_calls + 1
     self:setPalette()
+    term.drawPixels(0, 0, screen)--]=]
+    draw_calls = draw_calls + 1
+    if math.floor(os.epoch("utc") / 1000) > lastFrameUpdate then
+        lastFrameUpdate = math.floor(os.epoch("utc") / 1000)
+        local str = tostring(frameCount) .. " FPS "
+        term.setPaletteColor(254, 0, 0, 0)
+        term.setPaletteColor(255, 1, 1, 1)
+        for i = 1, #str do term.drawPixels(160 + i*4, 0, fpsCharacters[str:sub(i, i)]) end
+        frameCount = 0
+    end
+    frameCount = frameCount + 1
+    --if os.epoch("utc") - lastDraw < 12.666666 then sleep((12.666666 - (os.epoch("utc") - lastDraw)) / 1000) end
+    lastDraw = os.epoch("utc")
 end
 
 function LuaGB:run_n_cycles(n)
@@ -593,8 +739,8 @@ function quit()
     if LuaGB.game_loaded then
         --LuaGB:save_ram()
     end
-    print(draw_calls)
-    print(update_calls)
+    --print(draw_calls)
+    --print(update_calls)
 end
 
 main({"main.lua", ...})
@@ -632,4 +778,5 @@ os.queueEvent("update")
 parallel.waitForAny(update_loop, event_loop)
 
 term.setGraphicsMode(false)
+for i = 0, 15 do term.setPaletteColor(2^i, term.nativePaletteColor(2^i)) end
 print("")

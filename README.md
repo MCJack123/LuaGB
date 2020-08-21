@@ -5,7 +5,7 @@ This is designed to be fairly cross platform, and currently consists of a platfo
 
 ## Supported Features
 
-* Supports [CraftOS-PC](https://github.com/MCJack123/craftos) v1.2 or later.
+* Supports [CraftOS-PC](https://github.com/MCJack123/craftos2) v2.1 or later.
 * Original Gameboy (DMG) and Gameboy Color (GBC)
 * Decently cycle-approximate graphics? Seems slow for now, working on fixing.
 * Multiple Palettes for DMG Mode
