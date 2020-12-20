@@ -2,7 +2,6 @@
 --require = dofile(shell.dir() .. "/require.lua")
 --require.addPath(shell.dir())
 --require.addPath(fs.getDir(shell.dir()))
-if term.getGraphicsMode == nil then error("This requires CraftOS-PC v1.2 or later.") end
 package.path = package.path .. ";?.lua;../?.lua;?/init.lua;../?/init.lua"
 
 if pcall(require, "jit.opt") then
