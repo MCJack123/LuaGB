@@ -1,4 +1,4 @@
-local bit32 = require("bit")
+local bit32 = bit32
 
 local Mbc5 = {}
 
@@ -41,13 +41,21 @@ function Mbc5.new()
     end
     if address >= 0x2000 and address <= 0x2FFF then
       -- Write the lower 8 bits of the ROM bank
+      local oldbank = mbc5.rom_bank
       mbc5.rom_bank = bit32.band(mbc5.rom_bank, 0xFF00) + value
+      if rawget(mbc5, "cachebust") then
+        for i = 0x40, 0x7F do mbc5.cachebust(i * 256, mbc5.rom_bank, oldbank) end
+      end
       return
     end
     if address >= 0x3000 and address <= 0x3FFF then
       if mbc5.header.rom_size > (4096 * 1024) then
         -- This is a >4MB game, so set the high bit of the bank select
+        local oldbank = mbc5.rom_bank
         mbc5.rom_bank = bit32.band(mbc5.rom_bank, 0xFF) + bit32.lshift(bit32.band(value, 0x01), 8)
+        if rawget(mbc5, "cachebust") then
+          for i = 0x40, 0x7F do mbc5.cachebust(i * 256, mbc5.rom_bank, oldbank) end
+        end
       else
         -- This is a <= 4MB game. Do nothing!
       end
@@ -58,7 +66,11 @@ function Mbc5.new()
       if mbc5.rumble_pak then
         ram_mask = 0x7
       end
+      local oldbank = mbc5.ram_bank
       mbc5.ram_bank = bit32.band(value, ram_mask)
+      if rawget(mbc5, "cachebust") then
+        for i = 0xA0, 0xBF do mbc5.cachebust(i * 256, mbc5.ram_bank, oldbank) end
+      end
       if bit32.band(value, 0x08) ~= 0 and mbc5.rumbling == false then
         --print("Rumble on!")
         mbc5.rumbling = true

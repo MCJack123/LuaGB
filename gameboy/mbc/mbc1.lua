@@ -1,4 +1,4 @@
-local bit32 = require("bit")
+local bit32 = bit32
 
 local Mbc1 = {}
 
@@ -52,11 +52,19 @@ function Mbc1.new()
       if value == 0 then
         value = 1
       end
+      local oldbank = mbc1.rom_bank
       mbc1.rom_bank = value
+      if rawget(mbc1, "cachebust") then
+        for i = 0x40, 0x7F do mbc1.cachebust(i * 256, value, oldbank) end
+      end
       return
     end
     if address >= 0x4000 and address <= 0x5FFF then
+      local oldbank = mbc1.ram_bank
       mbc1.ram_bank = bit32.band(value, 0x03)
+      if rawget(mbc1, "cachebust") then
+        for i = 0xA0, 0xBF do mbc1.cachebust(i * 256, mbc1.ram_bank, oldbank) end
+      end
       return
     end
     if address >= 0x6000 and address <= 0x7FFF then

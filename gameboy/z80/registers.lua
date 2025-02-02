@@ -1,4 +1,4 @@
-local bit32 = require("bit")
+local bit32 = bit32
 
 local lshift = bit32.lshift
 local band = bit32.band
@@ -46,19 +46,19 @@ function Registers.new()
   end
 
   reg.af = function()
-    return lshift(reg.a, 8) + reg.f()
+    return "(lshift(reg.a, 8) + reg.f())"
   end
 
   reg.bc = function()
-    return lshift(reg.b, 8) + reg.c
+    return "(lshift(reg.b, 8) + reg.c)"
   end
 
   reg.de = function()
-    return lshift(reg.d, 8) + reg.e
+    return "(lshift(reg.d, 8) + reg.e)"
   end
 
   reg.hl = function()
-    return lshift(reg.h, 8) + reg.l
+    return "(lshift(reg.h, 8) + reg.l)"
   end
 
   reg.set_bc = function(value)

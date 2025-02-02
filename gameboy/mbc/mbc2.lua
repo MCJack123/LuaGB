@@ -1,4 +1,4 @@
-local bit32 = require("bit")
+local bit32 = bit32
 
 local Mbc2 = {}
 
@@ -42,6 +42,9 @@ function Mbc2.new()
       value = bit32.band(value, 0x0F)
       if value == 0 then
         value = 1
+      end
+      if rawget(mbc2, "cachebust") then
+        for i = 0x40, 0x7F do mbc2.cachebust(i * 256, value, mbc2.rom_bank) end
       end
       mbc2.rom_bank = value
       return

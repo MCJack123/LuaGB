@@ -1,4 +1,4 @@
-local bit32 = require("bit")
+local bit32 = bit32
 
 local Memory = {}
 
@@ -29,7 +29,11 @@ function Memory.new(modules)
     for i = starting_high_byte, ending_high_byte do
       --block_map[bit32.lshift(i, 8)] = {start=starting_address, block=mapped_block}
       block_map[bit32.lshift(i, 8)] = mapped_block
+      if rawget(memory, "cachebust") then
+        memory.cachebust(bit32.lshift(i, 8))
+      end
     end
+    rawset(mapped_block, "cachebust", rawget(memory, "cachebust"))
   end
 
   memory.generate_block = function(size, starting_address)

@@ -2,23 +2,31 @@
 --require = dofile(shell.dir() .. "/require.lua")
 --require.addPath(shell.dir())
 --require.addPath(fs.getDir(shell.dir()))
-if term.drawPixels == nil then error("This requires CraftOS-PC v2.1 or later.") end
+if term.getGraphicsMode == nil then error("This requires CraftOS-PC v1.2 or later.") end
 package.path = package.path .. ";?.lua;../?.lua;?/init.lua;../?/init.lua"
 
-if jit and jit.opt then
+if pcall(require, "jit.opt") then
+    require("jit.opt").start(
+        "maxmcode=8192",
+        "maxtrace=2000"
+        --
+    )
+elseif jit then
     jit.opt.start(
         "maxmcode=8192",
         "maxtrace=2000"
         --
     )
 end
-local bit32 = require("bit")
+local bit32 = bit32
 --local filebrowser = require("filebrowser")
 local Gameboy = require("gameboy")
 local binser = require("vendor/binser")
+--local quantize = dofile("quantize.lua")
 
 --require("vendor/profiler")
 
+local joy
 local LuaGB = {}
 LuaGB.audio_dump_running = false
 LuaGB.game_filename = ""
@@ -42,6 +50,12 @@ LuaGB.screen_scale = 3
 
 LuaGB.palette = {}
 
+local palettes = {}
+local palette_index = 1
+palettes[1] = {[0]={255, 255, 255}, [1]={192, 192, 192}, [2]={128, 128, 128}, [3]={0, 0, 0}}
+palettes[2] = {[0]={215, 215, 215}, [1]={140, 124, 114}, [2]={100, 82, 73}, [3]={45, 45, 45}}
+palettes[3] = {[0]={224, 248, 208}, [1]={136, 192, 112}, [2]={52, 104, 86}, [3]={8, 24, 32}}
+
 -- Do the check to see if JIT is enabled. If so use the optimized FFI structs.
 local ffi_status, ffi
 if type(jit) == "table" and jit.status() then
@@ -53,7 +67,8 @@ end
 
 function LuaGB:setPalette()
     --print(textutils.serialize(self.palette))
-    for k,v in pairs(self.palette) do term.setPaletteColor(k, v.r / 256, v.g / 256, v.b / 256) end
+    local m = term.getGraphicsMode()
+    for k,v in pairs(self.palette) do term.setPaletteColor(m == 1 and 2^k or k, v) end
 end
 
 function LuaGB:resize_window()
@@ -102,7 +117,7 @@ local function writeToFile(filename, data, size)
 end
 local function appendToFile(filename, data, size)
     size = size or string.len(data)
-    local file = fs.open(shell.resolve(filename), "ab")
+    local file = fs.open(shell.resolve(filename), "a")
     if file == nil then return false end
     file.write(string.sub(data, 1, size))
     file.close()
@@ -119,7 +134,8 @@ local function writeBinaryToFile(filename, data, size)
     size = size or string.len(data)
     local file = fs.open(shell.resolve(filename), "wb")
     if file == nil then return false end
-    for i = 1, size do file.write(string.byte(data, i, i)) end
+    --for i = 1, size do file.write(string.byte(data, i, i)) end
+    file.write(data)
     file.close()
     return true
 end
@@ -204,26 +220,56 @@ function LuaGB:load_state(number)
     end
 end
 
-LuaGB.sound_buffer = {}
-LuaGB.speaker = peripheral.find("speaker")
+LuaGB.sound_buffer_left, LuaGB.sound_buffer_right = {}, {}
+local leftSpeaker, rightSpeaker
+if peripheral.getType("left") == "speaker" and peripheral.getType("right") == "speaker" then
+    leftSpeaker, rightSpeaker = peripheral.wrap("left"), peripheral.wrap("right")
+    if leftSpeaker.setPosition then leftSpeaker.setPosition(1, 0, 0) end
+    if rightSpeaker.setPosition then rightSpeaker.setPosition(-1, 0, 0) end
+    LuaGB.speaker = leftSpeaker
+else LuaGB.speaker = peripheral.find("speaker") end
+local audio_flip = false
 
 function LuaGB.play_gameboy_audio(buffer)
-    if not LuaGB.speaker or not LuaGB.speaker.playLocalMusic then return end -- ComputerCraft has no audio
-    LuaGB.sound_buffer[#LuaGB.sound_buffer+1] = buffer
-    if #LuaGB.sound_buffer >= 4 then
-        local file, err = io.open("LuaGBAudioTmp.wav", "wb")
-        if file == nil then print("Could not write audio: " .. (err or "nil")) return end
-        file:write("RIFF\36\32\0\0WAVEfmt \16\0\0\0\1\0\2\0\0\128\0\0\0\0\2\0\4\0\16\0data\0\32\0\0")
-        for j = 1, 4 do
-            for i = 0, 1023 do
-                local n = LuaGB.sound_buffer[j][i] * 32767
-                file:write(string.char(bit32.band(n, 0xFF)) .. string.char(bit32.band(bit32.rshift(n, 8), 0xFF)))
-            end
-        end
-        file:close()
-        LuaGB.speaker.playLocalMusic("LuaGBAudioTmp.wav")
-        LuaGB.sound_buffer = {}
+    if not LuaGB.speaker or not LuaGB.speaker.playAudio then return end -- ComputerCraft < 1.100 has no audio
+    local l = #LuaGB.sound_buffer_left
+    for i = 1, 750 do
+        LuaGB.sound_buffer_left[l+i] = buffer[math.floor((i-1)/1.46484375)*2] * 127
+        LuaGB.sound_buffer_right[l+i] = buffer[math.floor((i-1)/1.46484375)*2+1] * 127
     end
+    if #LuaGB.sound_buffer_left > 2400 then
+        if leftSpeaker then
+            leftSpeaker.playAudio(LuaGB.sound_buffer_left, 1)
+            rightSpeaker.playAudio(LuaGB.sound_buffer_right, 1)
+        else
+            local buf = {}
+            for i = 1, #LuaGB.sound_buffer_left do buf[i] = (LuaGB.sound_buffer_left[i] + LuaGB.sound_buffer_right[i]) / 2 end
+            LuaGB.speaker.stop()
+            LuaGB.speaker.playAudio(buf, 1)
+        end
+        LuaGB.sound_buffer_left, LuaGB.sound_buffer_right = {}, {}
+    end
+    --LuaGB.sound_buffer[#LuaGB.sound_buffer+1] = buffer
+    --if #LuaGB.sound_buffer >= 4 then
+        -- local file, err = io.open(audio_flip and "LuaGBAudioTmp2.wav" or "LuaGBAudioTmp1.wav", "wb")
+        -- if file == nil then print("Could not write audio: " .. (err or "nil")) return end
+        -- file:write("RIFF\36\32\0\0WAVEfmt \16\0\0\0\1\0\2\0\0\128\0\0\0\0\2\0\4\0\16\0data\0\32\0\0")
+        -- for j = 1, 4 do
+        --     for i = 0, 1023 do
+        --         --local n = LuaGB.sound_buffer[j][i] * 32767
+        --         local n = buffer[i] * 32767
+        --         file:write(string.char(bit32.band(n, 0xFF)) .. string.char(bit32.band(bit32.rshift(n, 8), 0xFF)))
+        --     end
+        -- end
+        --local n = LuaGB.sound_buffer[4][1023] * 32767
+        --file:write((string.char(bit32.band(n, 0xFF)) .. string.char(bit32.band(bit32.rshift(n, 8), 0xFF))):rep(4096))
+        -- file:close()
+        --LuaGB.speaker.playNote("hat")
+        --LuaGB.speaker.playLocalMusic(audio_flip and "LuaGBAudioTmp2.wav" or "LuaGBAudioTmp1.wav")
+        --LuaGB.sound_buffer = {}
+        --audio_flip = not audio_flip
+        --term.setPixel(200, 100, audio_flip and 11 or 10)
+    --end
     --print("Audio success")
 end
 
@@ -234,7 +280,8 @@ function LuaGB.dump_audio(buffer)
     local output = ""
     local chars = {}
     for i = 0, 1024 - 1 do
-        local sample = math.floor(buffer[i] * 32767) -- re-root in 16-bit range
+        local sample = buffer[i]
+        sample = math.floor(sample * (32768 - 1)) -- re-root in 16-bit range
         chars[i * 2] = string.char(bit32.band(sample, 0xFF))
         chars[i * 2 + 1] = string.char(bit32.rshift(bit32.band(sample, 0xFF00), 8))
     end
@@ -307,6 +354,7 @@ function main(args)
     filebrowser.init(LuaGB.gameboy)--]]
     term.setGraphicsMode(2)
     term.clear()
+    if joystick and joystick.count() > 0 then joy = joystick.open(0) end
     LuaGB:resize_window()
 end
 
@@ -452,16 +500,15 @@ local fpsCharacters = {
 }
 
 local lastFrameUpdate, frameCount = math.floor(os.epoch("utc") / 1000), 0
-local lastDraw = os.epoch("utc")
 
 function LuaGB:draw_game_screen(dx, dy, scale)
-    ---[=[
     local pixels = self.gameboy.graphics.game_screen
     self.palette = {}
+    self.palette_rev = {}
     local c = 0
     local screen = {}
     for y = 0, 143 do
-        local row, pix_row = {}, pixels[y]
+        local row, pix_row = "", pixels[y]
         for x = 0, 159 do
             --[[if raw_image_data then
                 local pixel = raw_image_data[y*stride+x]
@@ -473,49 +520,41 @@ function LuaGB:draw_game_screen(dx, dy, scale)
             else
                 image_data:setPixel(x, y, pixels[y][x][1], pixels[y][x][2], pixels[y][x][3], 255)
             end]]
-            local pixel = {}
             local v_pixel = pix_row[x]
+            local pixel = v_pixel[1] * 65536 + v_pixel[2] * 256 + v_pixel[3]
             
-            pixel.r = v_pixel[1]
-            pixel.g = v_pixel[2]
-            pixel.b = v_pixel[3]
             --if pixel.r ~= 255 or pixel.g ~= 255 or pixel.b ~= 255 then print(textutils.serialize(pixel)) end
-            local found = false
-            for k,v in pairs(self.palette) do 
-                if v.r == pixel.r and v.g == pixel.g and v.b == pixel.b then
-                    found = true
-                    --term.setPixel(x, y, k)
-                    row[x+1] = k
-                end 
-            end
-            if not found then
-                self.palette[c] = pixel
-                --term.setPixel(x, y, c)
-                row[x+1] = c
-                c = c + 1
-                if c == 15 then c = 16 end
-                if c >= 256 then
+            local p = self.palette_rev[pixel]
+            if not p then
+                p = c
+                if p >= 256 then
                     term.setGraphicsMode(false)
                     error("Too many colors on-screen")
                 end
+                c = c + 1
+                if c == 15 then c = 16 end
+                self.palette_rev[pixel] = p
+                self.palette[p] = pixel
             end
+            row = row .. string.char(p)
         end
         screen[y+1] = row
     end
+    --local newpalette, map = quantize.quantize(16, self.palette)
+    --local map2 = setmetatable({}, {__index = function(_, idx) return 2 ^ (map[idx] or idx) end})
+    --screen = quantize.remap(screen, map2)
     self:setPalette()
-    term.drawPixels(0, 0, screen)--]=]
+    term.drawPixels(0, 0, screen)
     draw_calls = draw_calls + 1
     if math.floor(os.epoch("utc") / 1000) > lastFrameUpdate then
         lastFrameUpdate = math.floor(os.epoch("utc") / 1000)
-        local str = tostring(frameCount) .. " FPS "
+        local str = tostring(frameCount) .. " FPS"
         term.setPaletteColor(254, 0, 0, 0)
         term.setPaletteColor(255, 1, 1, 1)
         for i = 1, #str do term.drawPixels(160 + i*4, 0, fpsCharacters[str:sub(i, i)]) end
         frameCount = 0
     end
     frameCount = frameCount + 1
-    --if os.epoch("utc") - lastDraw < 12.666666 then sleep((12.666666 - (os.epoch("utc") - lastDraw)) / 1000) end
-    lastDraw = os.epoch("utc")
 end
 
 function LuaGB:run_n_cycles(n)
@@ -529,8 +568,18 @@ function LuaGB:reset()
     self.gameboy:initialize()
     self.gameboy:reset()
     self.gameboy.audio.on_buffer_full(self.play_gameboy_audio)
+    self.gameboy.audio.use_sound = sound and not (self.speaker and self.speaker.playAudio)
     self.audio_dump_running = false
-    self.gameboy.graphics.palette_dmg_colors = palette
+    self.gameboy.graphics.palette_dmg_colors = palettes[palette_index]
+    if sound then
+        if sound.setStereo then sound.setStereo(true, true) end
+        for i = 1, 4 do sound.setVolume(i, 0) end
+        sound.setWaveType(1, "square")
+        sound.setWaveType(2, "square")
+        sound.setWaveType(3, "triangle")
+        sound.setWaveType(4, "noise")
+        sound.setFrequency(4, 880)
+    end
 
     -- Initialize Debug Panels
     --for _, panel in pairs(panels) do
@@ -572,6 +621,13 @@ for i = 1, 8 do
     action_keys["f" .. tostring(i)] = function()
         LuaGB:save_state(i)
     end
+end
+
+action_keys.c = function()
+    palette_index = palette_index + 1
+    if palette_index > #palettes then palette_index = 1 end
+    LuaGB.gameboy.graphics.palette_dmg_colors = palettes[palette_index]
+    if LuaGB.gameboy.type == LuaGB.gameboy.types.dmg then LuaGB.gameboy.graphics.palette:reset() end
 end
 
 action_keys["f9"] = function() LuaGB.gameboy.audio.tone1.debug_disabled = not LuaGB.gameboy.audio.tone1.debug_disabled end
@@ -632,6 +688,12 @@ input_mappings.z = "B"
 input_mappings["enter"] = "Start"
 input_mappings.rightShift = "Select"
 
+local joy_mappings = {}
+joy_mappings[1] = "A"
+joy_mappings[2] = "B"
+joy_mappings[8] = "Select"
+joy_mappings[9] = "Start"
+
 function keypressed(key)
     if input_mappings[key] then
         LuaGB.gameboy.input.keys[input_mappings[key]] = 1
@@ -677,6 +739,59 @@ function mousepressed(x, y, button)
     end
 end
 
+local lastJoyState = {0, 0}
+local function joypressed(button)
+    if joy_mappings[button] then
+        LuaGB.gameboy.input.keys[joy_mappings[button]] = 1
+        LuaGB.gameboy.input.update()
+    end
+end
+
+local function joyreleased(button)
+    if joy_mappings[button] then
+        LuaGB.gameboy.input.keys[joy_mappings[button]] = 0
+        LuaGB.gameboy.input.update()
+    end
+end
+
+local function jstate(n)
+    if n > 0.1 then return 1
+    elseif n < -0.1 then return -1
+    else return 0 end
+end
+
+local function joyaxis(x, y)
+    x, y = jstate(x), jstate(y)
+    if lastJoyState[1] ~= x then
+        if lastJoyState[1] == 0 then
+            if x == -1 then LuaGB.gameboy.input.keys.Up = 1
+            else LuaGB.gameboy.input.keys.Down = 1 end
+        else
+            if lastJoyState[1] == -1 then LuaGB.gameboy.input.keys.Up = 0
+            else LuaGB.gameboy.input.keys.Down = 0 end
+            if x ~= 0 then
+                if x == -1 then LuaGB.gameboy.input.keys.Up = 1
+                else LuaGB.gameboy.input.keys.Down = 1 end
+            end
+        end
+    end
+    if lastJoyState[2] ~= y then
+        if lastJoyState[2] == 0 then
+            if y == -1 then LuaGB.gameboy.input.keys.Left = 1
+            else LuaGB.gameboy.input.keys.Right = 1 end
+        else
+            if lastJoyState[2] == -1 then LuaGB.gameboy.input.keys.Left = 0
+            else LuaGB.gameboy.input.keys.Right = 0 end
+            if y ~= 0 then
+                if y == -1 then LuaGB.gameboy.input.keys.Left = 1
+                else LuaGB.gameboy.input.keys.Right = 1 end
+            end
+        end
+    end
+    lastJoyState = {x, y}
+end
+
+
 function update()
     if LuaGB.menu_active then
         --filebrowser.update()
@@ -684,7 +799,7 @@ function update()
         if LuaGB.emulator_running then
             --LuaGB.gameboy:run_until_vblank()
             LuaGB.gameboy:run_until_vblank()
-        else os.queueEvent('terminate') end
+        --[[else os.queueEvent('terminate')]] end
     end
     if LuaGB.gameboy.cartridge.external_ram.dirty then
         LuaGB.save_delay = LuaGB.save_delay + 1
@@ -696,7 +811,7 @@ function update()
     end
     update_calls = update_calls + 1
     -- Apply any changed local settings to the gameboy
-    --LuaGB.gameboy.graphics.palette.set_dmg_colors(filebrowser.palette[0], filebrowser.palette[1], filebrowser.palette[2], filebrowser.palette[3])
+    LuaGB.gameboy.graphics.palette.set_dmg_colors(palettes[palette_index][0], palettes[palette_index][1], palettes[palette_index][2], palettes[palette_index][3])
 end
 
 function draw()
@@ -756,6 +871,11 @@ function event_loop()
             keypressed(keys.getName(p1))
         elseif ev == "key_up" then
             keyreleased(keys.getName(p1))
+        elseif ev == "joystick_press" and p1 == 0 then joypressed(p2)
+        elseif ev == "joystick_up" and p1 == 0 then joyreleased(p2)
+        elseif ev == "joystick_axis" and p1 == 0 then
+            if p2 == 0 then joyaxis(lastJoyState[1], p3)
+            elseif p2 == 1 then joyaxis(p3, lastJoyState[2]) end
         elseif ev == "terminate" then
             quit()
             break
@@ -765,18 +885,30 @@ function event_loop()
     end
 end
 
+local last_render = 0
 function update_loop()
     while true do
         os.pullEvent("update")
-        update()
-        draw()
+        if os.epoch("utc") - last_render >= 16 then
+            --print(os.epoch "utc" - last_render)
+            last_render = os.epoch("utc")
+            update()
+            draw()
+        end
         os.queueEvent("update")
     end
 end
 
 os.queueEvent("update")
-parallel.waitForAny(update_loop, event_loop)
+assert(xpcall(parallel.waitForAny, function(e)
+    term.setGraphicsMode(false)
+    for i = 0, 15 do term.setPaletteColor(2^i, term.nativePaletteColor(2^i)) end
+    print("")
+    return debug.traceback(e)
+end, update_loop, event_loop))
 
 term.setGraphicsMode(false)
 for i = 0, 15 do term.setPaletteColor(2^i, term.nativePaletteColor(2^i)) end
 print("")
+if sound then if sound.setStereo then sound.setStereo(false) end for i = 1, 4 do sound.setVolume(i, 0) end end
+if joy then joy.close() end

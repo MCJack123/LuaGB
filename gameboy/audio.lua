@@ -1,6 +1,33 @@
-local bit32 = require("bit")
+local bit32 = bit32
 
 local Audio = {}
+
+local sound
+if _G.sound then
+  local s = _G.sound
+  local state = {}
+  for i = 1, 5 do state[i] = {freq = 0, vol = 0, type = "none", param = nil} end
+  sound = {
+    version = 2,
+    setWaveType = function(channel, type, param)
+      if state[channel].type == type and state[channel].param == param then return end
+      s.setWaveType(channel, type, param)
+      state[channel].type = type
+      state[channel].param = param
+    end,
+    setVolume = function(channel, vol)
+      if state[channel].vol == vol then return end
+      s.setVolume(channel, math.max(math.min(vol * 5, 1), 0))
+      state[channel].vol = vol
+    end,
+    setFrequency = function(channel, freq)
+      if state[channel].freq == freq then return end
+      s.setFrequency(channel, math.max(math.min(freq, 16383), 0))
+      state[channel].freq = freq
+    end,
+    setPan = function() end
+  }
+end
 
 function Audio.new(modules)
   local io = modules.io
@@ -71,6 +98,7 @@ function Audio.new(modules)
     audio.wave3.sample_index = 0
     audio.wave3.frequency_shadow = 0
     audio.wave3.active = false
+    audio.wave3.last_wave = {}
 
     audio.noise4.debug_disabled = false
     audio.noise4.volume_initial = 0
@@ -181,6 +209,7 @@ function Audio.new(modules)
     local length_data = bit32.band(byte, 0x3F)
     local length_cycles = (64 - length_data) * 16384
     audio.tone1.max_length = length_cycles
+    if audio.use_sound then sound.setWaveType(1, "square", audio.tone1.duty_length) end
   end
 
   -- Channel 1 Volume Envelope
@@ -197,6 +226,7 @@ function Audio.new(modules)
     local envelope_step_data = bit32.band(byte, 0x07)
     local envelope_step_cycles = envelope_step_data * 65536
     audio.tone1.volume_step_length = envelope_step_cycles
+    if audio.use_sound then sound.setVolume(1, audio.tone1.volume_initial / 160) end
   end
 
   -- Channel 1 Frequency - Low Bits
@@ -208,6 +238,7 @@ function Audio.new(modules)
     local freq_value = freq_high + freq_low
     audio.tone1.period = 32 * (2048 - freq_value)
     audio.tone1.frequency_shadow = freq_value
+    if audio.use_sound then sound.setFrequency(1, math.min(131072 / (bit32.band(bit32.bnot(freq_value), 0x7FF) + 1), 22049)) end
   end
 
   -- Channel 1 Frequency and Trigger - High Bits
@@ -229,6 +260,7 @@ function Audio.new(modules)
     audio.tone1.frequency_shadow = freq_value
     audio.tone1.period_conter = (2048 - freq_value)
     audio.tone1.frequency_shift_counter = 0
+    if audio.use_sound then sound.setFrequency(1, math.min(131072 / (bit32.band(bit32.bnot(freq_value), 0x7FF) + 1), 22049)) end
   end
 
   -- Channel 2 Sound Length / Wave Pattern Duty
@@ -241,6 +273,7 @@ function Audio.new(modules)
     local length_data = bit32.band(byte, 0x3F)
     local length_cycles = (64 - length_data) * 16384
     audio.tone2.max_length = length_cycles
+    if audio.use_sound then sound.setWaveType(2, "square", audio.tone2.duty_length) end
   end
 
   -- Channel 2 Volume Envelope
@@ -257,6 +290,7 @@ function Audio.new(modules)
     local envelope_step_data = bit32.band(byte, 0x07)
     local envelope_step_cycles = envelope_step_data * 65536
     audio.tone2.volume_step_length = envelope_step_cycles
+    if audio.use_sound then sound.setVolume(2, audio.tone2.volume_initial / 160) end
   end
 
   -- Channel 2 Frequency - Low Bits
@@ -268,6 +302,7 @@ function Audio.new(modules)
     local freq_value = freq_high + freq_low
     audio.tone2.period = 32 * (2048 - freq_value)
     audio.tone2.frequency_shadow = freq_value
+    if audio.use_sound then sound.setFrequency(2, math.min(131072 / (bit32.band(bit32.bnot(freq_value), 0x7FF) + 1), 22049)) end
   end
 
   -- Channel 2 Frequency and Trigger - High Bits
@@ -288,6 +323,7 @@ function Audio.new(modules)
       audio.tone2.base_cycle = timers.system_clock
       audio.tone2.active = true
     end
+    if audio.use_sound then sound.setFrequency(2, math.min(131072 / (bit32.band(bit32.bnot(freq_value), 0x7FF) + 1), 22049)) end
   end
 
   -- Channel 3 Enabled
@@ -295,6 +331,7 @@ function Audio.new(modules)
     audio.generate_pending_samples()
     io.ram[ports.NR30] = byte
     audio.wave3.enabled = bit32.band(byte, 0x80) ~= 0
+    if audio.use_sound then sound.setVolume(3, audio.wave3.enabled and bit32.rshift(15, audio.wave3.volume_shift) / 160 or 0) end
   end
 
   -- Channel 3 Length
@@ -316,6 +353,11 @@ function Audio.new(modules)
     io.ram[ports.NR32] = byte
     local volume_select = bit32.rshift(bit32.band(byte, 0x60), 5)
     audio.wave3.volume_shift = volume_shift_mappings[volume_select]
+    if audio.use_sound then
+        sound.setVolume(3, audio.wave3.enabled and bit32.rshift(15, audio.wave3.volume_shift) / 150 or 0)
+        local v = bit32.band(bit32.rshift(io.ram[ports.NR51], 0), 0x11)
+        sound.setPan(3, v == 0x11 and 0 or (v == 0x10 and -1 or 1))
+    end
   end
 
   -- Channel 3 Frequency - Low Bits
@@ -327,6 +369,7 @@ function Audio.new(modules)
     local freq_value = freq_high + freq_low
     audio.wave3.period = 64 * (2048 - freq_value)
     audio.wave3.frequency_shadow = freq_value
+    if audio.use_sound then sound.setFrequency(3, math.min(65536 / (bit32.band(bit32.bnot(freq_value), 0x7FF) + 1), 22049)) end
   end
 
   -- Channel 3 Frequency and Trigger - High Bits
@@ -348,6 +391,7 @@ function Audio.new(modules)
       audio.wave3.sample_index = 0
       audio.wave3.active = true
     end
+    if audio.use_sound then sound.setFrequency(3, math.min(65536 / (bit32.band(bit32.bnot(freq_value), 0x7FF) + 1), 22049)) end
   end
 
   -- Channel 4 Length
@@ -359,6 +403,7 @@ function Audio.new(modules)
     local length_data = bit32.band(byte, 0x3F)
     local length_cycles = (64 - length_data) * 16384
     audio.noise4.max_length = length_cycles
+    if audio.use_sound then sound.setFrequency(4, length_cycles) end
   end
 
   -- Channel 4 Volume Envelope
@@ -375,6 +420,7 @@ function Audio.new(modules)
     local envelope_step_data = bit32.band(byte, 0x07)
     local envelope_step_cycles = envelope_step_data * 65536
     audio.noise4.volume_step_length = envelope_step_cycles
+    if audio.use_sound then sound.setVolume(4, audio.noise4.volume_initial / 160) end
   end
 
   local polynomial_divisors = {}
@@ -430,6 +476,7 @@ function Audio.new(modules)
         end
         tone1.period = 32 * (2048 - tone1.frequency_shadow)
         tone1.frequency_shift_counter = tone1.frequency_shift_counter + 1
+        if audio.use_sound then sound.setFrequency(1, math.min(131072 / (bit32.band(bit32.bnot(tone1.frequency_shadow), 0x7FF) + 1), 22049)) end
       end
     end
   end
@@ -467,6 +514,11 @@ function Audio.new(modules)
       if tone1.volume_step_length > 0 then
         volume = volume + tone1.volume_direction * math.floor(duration / tone1.volume_step_length)
       end
+      if audio.use_sound then
+        sound.setVolume(1, math.min(math.max(volume / 160, 0), 1))
+        local v = bit32.band(bit32.rshift(io.ram[ports.NR51], 0), 0x11)
+        sound.setPan(1, v == 0x11 and 0 or (v == 0x10 and -1 or 1))
+      end
       if volume > 0 then
         if volume > 0xF then
           volume = 0xF
@@ -492,6 +544,7 @@ function Audio.new(modules)
       end
     else
       audio.tone1.active = false
+      if audio.use_sound then sound.setVolume(1, 0) end
     end
     return 0
   end
@@ -503,6 +556,11 @@ function Audio.new(modules)
       local volume = tone2.volume_initial
       if tone2.volume_step_length > 0 then
         volume = volume + tone2.volume_direction * math.floor(duration / tone2.volume_step_length)
+      end
+      if audio.use_sound then
+        sound.setVolume(2, math.min(math.max(volume / 160, 0), 1))
+        local v = bit32.band(bit32.rshift(io.ram[ports.NR51], 1), 0x11)
+        sound.setPan(2, v == 0x11 and 0 or (v == 0x10 and -1 or 1))
       end
       if volume > 0 then
         if volume > 0xF then
@@ -529,6 +587,7 @@ function Audio.new(modules)
       end
     else
       tone2.active = false
+      if audio.use_sound then sound.setVolume(2, 0) end
     end
     return 0
   end
@@ -553,6 +612,20 @@ function Audio.new(modules)
           wave3.frequency_last_update = wave3.frequency_last_update + 2
         end
 
+        if audio.use_sound and sound.version and sound.version >= 2 then
+            local t = {}
+            local eq = true
+            for i = 0, 15 do
+                t[i*2+1] = bit32.rshift(io.ram[0x30 + i], 4) / 8 - 1
+                t[i*2+2] = bit32.band(io.ram[0x30 + i], 0xF) / 8 - 1
+                if eq and t[i*2+1] ~= wave3.last_wave[i*2+1] or t[i*2+2] ~= wave3.last_wave[i*2+2] then eq = false end
+            end
+            if not eq then
+                sound.setWaveType(3, "custom", t)
+                wave3.last_wave = t
+            end
+        end
+
         local byte_index = bit32.rshift(wave3.sample_index, 1)
         local sample = io.ram[0x30 + byte_index]
         -- If this is an even numbered sample, shift the high nybble
@@ -569,9 +642,11 @@ function Audio.new(modules)
         return sample
       else
         wave3.active = false
+        if audio.use_sound then sound.setVolume(3, 0) end
       end
     else
       wave3.active = false
+      if audio.use_sound then sound.setVolume(3, 0) end
     end
     return 0
   end
@@ -584,6 +659,11 @@ function Audio.new(modules)
       local volume = noise4.volume_initial
       if noise4.volume_step_length > 0 then
         volume = volume + noise4.volume_direction * math.floor(duration / noise4.volume_step_length)
+      end
+      if audio.use_sound then
+        sound.setVolume(4, math.min(math.max(volume / 160, 0), 1))
+        local v = bit32.band(bit32.rshift(io.ram[ports.NR51], 3), 0x11)
+        sound.setPan(4, v == 0x11 and 0 or (v == 0x10 and -1 or 1))
       end
       if volume > 0 then
         if volume > 0xF then
@@ -598,6 +678,7 @@ function Audio.new(modules)
       end
     else
       noise4.active = false
+      if audio.use_sound then sound.setVolume(4, 0) end
     end
     return 0
   end
@@ -636,6 +717,7 @@ function Audio.new(modules)
   audio.debug.enabled = false
 
   audio.generate_pending_samples = function()
+    if audio.disabled then return end
     while next_sample_cycle < timers.system_clock do
       local tone1  = audio.tone1.generate_sample(next_sample_cycle)
       local tone2  = audio.tone2.generate_sample(next_sample_cycle)

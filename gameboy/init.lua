@@ -1,4 +1,4 @@
-local bit32 = require("bit")
+local bit32 = bit32
 
 local Gameboy = {}
 
@@ -78,32 +78,45 @@ function Gameboy:step()
   if self.timers.system_clock > self.graphics.next_edge then
     self.graphics.update()
   end
-  self.processor.process_instruction()
-  return
 end
 
 function Gameboy:run_until_vblank()
-  local instructions = 0
-  while self.io.ram[self.io.ports.LY] == 144 and instructions < 100000 do
-    self:step()
-    instructions = instructions + 1
+  self.processor.check_exit = function()
+    local timers, graphics = self.timers, self.graphics
+    if timers.enabled then
+      timers:update()
+    end
+    if timers.system_clock > graphics.next_edge then
+      graphics.update()
+    end
+    if self.io.ram[0x44] ~= 144 then
+      self.processor.check_exit = function()
+        local timers, graphics = self.timers, self.graphics
+        if timers.enabled then
+          timers:update()
+        end
+        if timers.system_clock > graphics.next_edge then
+          graphics.update()
+        end
+        if self.io.ram[0x44] == 144 then
+          coroutine.yield()
+        end
+      end
+    end
   end
-  --print(self.processor.registers.pc)
-  while self.io.ram[self.io.ports.LY] ~= 144 and instructions < 100000  do
-    self:step()
-    instructions = instructions + 1
-  end
-  --print(self.processor.registers.pc)
+  self.processor.run_until_yield()
   self.audio.update()
 end
 
 function Gameboy:run_until_hblank()
   local old_scanline = self.io.ram[self.io.ports.LY]
-  local instructions = 0
-  while old_scanline == self.io.ram[self.io.ports.LY] and instructions < 100000 do
+  self.processor.check_exit = function()
     self:step()
-    instructions = instructions + 1
+    if self.io.ram[0x44] ~= old_scanline then
+      coroutine.yield()
+    end
   end
+  self.processor.run_until_yield()
   self.audio.update()
 end
 

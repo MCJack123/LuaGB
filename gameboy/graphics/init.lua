@@ -1,4 +1,4 @@
-local bit32 = require("bit")
+local bit32 = bit32
 
 local Cache = require("gameboy/graphics/cache")
 local Palette = require("gameboy/graphics/palette")

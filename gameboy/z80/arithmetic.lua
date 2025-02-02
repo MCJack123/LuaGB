@@ -1,4 +1,4 @@
-local bit32 = require("bit")
+local bit32 = bit32
 
 local lshift = bit32.lshift
 local rshift = bit32.rshift
@@ -9,19 +9,14 @@ local bnor = bit32.bnor
 
 function apply(opcodes, opcode_cycles, z80, memory)
   local read_at_hl = z80.read_at_hl
-  local set_at_hl = z80.set_at_hl
   local read_nn = z80.read_nn
   local reg = z80.registers
-  local flags = reg.flags
 
-  local read_byte = memory.read_byte
-  local write_byte = memory.write_byte
-
-  local add_to_a = function(value)
+  local add_to_a = function(value) return ([[do
     -- half-carry
-    flags.h = band(reg.a, 0xF) + band(value, 0xF) > 0xF
+    flags.h = band(reg.a, 0xF) + band(%s, 0xF) > 0xF
 
-    local sum = reg.a + value
+    local sum = reg.a + %s
 
     -- carry (and overflow correction)
     flags.c = sum > 0xFF
@@ -30,16 +25,16 @@ function apply(opcodes, opcode_cycles, z80, memory)
 
     flags.z = reg.a == 0
     flags.n = false
-  end
+  end ]]):format(value, value) end
 
-  local adc_to_a = function(value)
+  local adc_to_a = function(value) return ([[do
     -- half-carry
     local carry = 0
     if flags.c then
       carry = 1
     end
-    flags.h = band(reg.a, 0xF) + band(value, 0xF) + carry > 0xF
-    local sum = reg.a + value + carry
+    flags.h = band(reg.a, 0xF) + band(%s, 0xF) + carry > 0xF
+    local sum = reg.a + %s + carry
 
     -- carry (and overflow correction)
     flags.c = sum > 0xFF
@@ -47,42 +42,42 @@ function apply(opcodes, opcode_cycles, z80, memory)
 
     flags.z = reg.a == 0
     flags.n = false
-  end
+  end ]]):format(value, value) end
 
   -- add A, r
-  opcodes[0x80] = function() add_to_a(reg.b) end
-  opcodes[0x81] = function() add_to_a(reg.c) end
-  opcodes[0x82] = function() add_to_a(reg.d) end
-  opcodes[0x83] = function() add_to_a(reg.e) end
-  opcodes[0x84] = function() add_to_a(reg.h) end
-  opcodes[0x85] = function() add_to_a(reg.l) end
+  opcodes[0x80] = function() return add_to_a("reg.b") end
+  opcodes[0x81] = function() return add_to_a("reg.c") end
+  opcodes[0x82] = function() return add_to_a("reg.d") end
+  opcodes[0x83] = function() return add_to_a("reg.e") end
+  opcodes[0x84] = function() return add_to_a("reg.h") end
+  opcodes[0x85] = function() return add_to_a("reg.l") end
   opcode_cycles[0x86] = 8
-  opcodes[0x86] = function() add_to_a(read_at_hl()) end
-  opcodes[0x87] = function() add_to_a(reg.a) end
+  opcodes[0x86] = function() return add_to_a(read_at_hl()) end
+  opcodes[0x87] = function() return add_to_a("reg.a") end
 
   -- add A, nn
   opcode_cycles[0xC6] = 8
-  opcodes[0xC6] = function() add_to_a(read_nn()) end
+  opcodes[0xC6] = function() return add_to_a(read_nn()) end
 
   -- adc A, r
-  opcodes[0x88] = function() adc_to_a(reg.b) end
-  opcodes[0x89] = function() adc_to_a(reg.c) end
-  opcodes[0x8A] = function() adc_to_a(reg.d) end
-  opcodes[0x8B] = function() adc_to_a(reg.e) end
-  opcodes[0x8C] = function() adc_to_a(reg.h) end
-  opcodes[0x8D] = function() adc_to_a(reg.l) end
+  opcodes[0x88] = function() return adc_to_a("reg.b") end
+  opcodes[0x89] = function() return adc_to_a("reg.c") end
+  opcodes[0x8A] = function() return adc_to_a("reg.d") end
+  opcodes[0x8B] = function() return adc_to_a("reg.e") end
+  opcodes[0x8C] = function() return adc_to_a("reg.h") end
+  opcodes[0x8D] = function() return adc_to_a("reg.l") end
   opcode_cycles[0x8E] = 8
-  opcodes[0x8E] = function() adc_to_a(read_at_hl()) end
-  opcodes[0x8F] = function() adc_to_a(reg.a) end
+  opcodes[0x8E] = function() return adc_to_a(read_at_hl()) end
+  opcodes[0x8F] = function() return adc_to_a("reg.a") end
 
   -- adc A, nn
   opcode_cycles[0xCE] = 8
-  opcodes[0xCE] = function() adc_to_a(read_nn()) end
+  opcodes[0xCE] = function() return adc_to_a(read_nn()) end
 
-  sub_from_a = function(value)
+  sub_from_a = function(value) return ([[
     -- half-carry
-    flags.h = band(reg.a, 0xF) - band(value, 0xF) < 0
-    reg.a = reg.a - value
+    flags.h = band(reg.a, 0xF) - band(%s, 0xF) < 0
+    reg.a = reg.a - %s
 
     -- carry (and overflow correction)
     flags.c = reg.a < 0 or reg.a > 0xFF
@@ -90,17 +85,17 @@ function apply(opcodes, opcode_cycles, z80, memory)
 
     flags.z = reg.a == 0
     flags.n = true
-  end
+  ]]):format(value, value) end
 
-  sbc_from_a = function(value)
+  sbc_from_a = function(value) return ([[do
     local carry = 0
     if flags.c then
       carry = 1
     end
     -- half-carry
-    flags.h = band(reg.a, 0xF) - band(value, 0xF) - carry < 0
+    flags.h = band(reg.a, 0xF) - band(%s, 0xF) - carry < 0
 
-    local difference = reg.a - value - carry
+    local difference = reg.a - %s - carry
 
     -- carry (and overflow correction)
     flags.c = difference < 0 or difference > 0xFF
@@ -108,42 +103,42 @@ function apply(opcodes, opcode_cycles, z80, memory)
 
     flags.z = reg.a == 0
     flags.n = true
-  end
+  end ]]):format(value, value) end
 
   -- sub A, r
-  opcodes[0x90] = function() sub_from_a(reg.b) end
-  opcodes[0x91] = function() sub_from_a(reg.c) end
-  opcodes[0x92] = function() sub_from_a(reg.d) end
-  opcodes[0x93] = function() sub_from_a(reg.e) end
-  opcodes[0x94] = function() sub_from_a(reg.h) end
-  opcodes[0x95] = function() sub_from_a(reg.l) end
+  opcodes[0x90] = function() return sub_from_a("reg.b") end
+  opcodes[0x91] = function() return sub_from_a("reg.c") end
+  opcodes[0x92] = function() return sub_from_a("reg.d") end
+  opcodes[0x93] = function() return sub_from_a("reg.e") end
+  opcodes[0x94] = function() return sub_from_a("reg.h") end
+  opcodes[0x95] = function() return sub_from_a("reg.l") end
   opcode_cycles[0x96] = 8
-  opcodes[0x96] = function() sub_from_a(read_at_hl()) end
-  opcodes[0x97] = function() sub_from_a(reg.a) end
+  opcodes[0x96] = function() return sub_from_a(read_at_hl()) end
+  opcodes[0x97] = function() return sub_from_a("reg.a") end
 
   -- sub A, nn
   opcode_cycles[0xD6] = 8
-  opcodes[0xD6] = function() sub_from_a(read_nn()) end
+  opcodes[0xD6] = function() return sub_from_a(read_nn()) end
 
   -- sbc A, r
-  opcodes[0x98] = function() sbc_from_a(reg.b) end
-  opcodes[0x99] = function() sbc_from_a(reg.c) end
-  opcodes[0x9A] = function() sbc_from_a(reg.d) end
-  opcodes[0x9B] = function() sbc_from_a(reg.e) end
-  opcodes[0x9C] = function() sbc_from_a(reg.h) end
-  opcodes[0x9D] = function() sbc_from_a(reg.l) end
+  opcodes[0x98] = function() return sbc_from_a("reg.b") end
+  opcodes[0x99] = function() return sbc_from_a("reg.c") end
+  opcodes[0x9A] = function() return sbc_from_a("reg.d") end
+  opcodes[0x9B] = function() return sbc_from_a("reg.e") end
+  opcodes[0x9C] = function() return sbc_from_a("reg.h") end
+  opcodes[0x9D] = function() return sbc_from_a("reg.l") end
   opcode_cycles[0x9E] = 8
-  opcodes[0x9E] = function() sbc_from_a(read_at_hl()) end
-  opcodes[0x9F] = function() sbc_from_a(reg.a) end
+  opcodes[0x9E] = function() return sbc_from_a(read_at_hl()) end
+  opcodes[0x9F] = function() return sbc_from_a("reg.a") end
 
   -- sbc A, nn
   opcode_cycles[0xDE] = 8
-  opcodes[0xDE] = function() sbc_from_a(read_nn()) end
+  opcodes[0xDE] = function() return sbc_from_a(read_nn()) end
 
   -- daa
   -- BCD adjustment, correct implementation details located here:
   -- http://www.z80.info/z80syntx.htm#DAA
-  opcodes[0x27] = function()
+  opcodes[0x27] = function() return [[do
     local a = reg.a
     if not flags.n then
       -- Addition Mode, adjust BCD for previous addition-like instruction
@@ -176,75 +171,77 @@ function apply(opcodes, opcode_cycles, z80, memory)
     reg.a = band(a, 0xFF)
     -- Update zero flag based on A's contents
     flags.z = reg.a == 0
-  end
+  end ]] end
 
-  add_to_hl = function(value)
+  add_to_hl = function(value) return ([[do
     -- half carry
-    flags.h = band(reg.hl(), 0xFFF) + band(value, 0xFFF) > 0xFFF
-    local sum = reg.hl() + value
+    flags.h = band(%s, 0xFFF) + band(%s, 0xFFF) > 0xFFF
+    local sum = %s + %s
 
     -- carry
     flags.c = sum > 0xFFFF or sum < 0x0000
     reg.set_hl(band(sum, 0xFFFF))
     flags.n = false
-  end
+  end ]]):format(reg.hl(), value, reg.hl(), value) end
 
   -- add HL, rr
   opcode_cycles[0x09] = 8
   opcode_cycles[0x19] = 8
   opcode_cycles[0x29] = 8
   opcode_cycles[0x39] = 8
-  opcodes[0x09] = function() add_to_hl(reg.bc()) end
-  opcodes[0x19] = function() add_to_hl(reg.de()) end
-  opcodes[0x29] = function() add_to_hl(reg.hl()) end
-  opcodes[0x39] = function() add_to_hl(reg.sp) end
+  opcodes[0x09] = function() return add_to_hl(reg.bc()) end
+  opcodes[0x19] = function() return add_to_hl(reg.de()) end
+  opcodes[0x29] = function() return add_to_hl(reg.hl()) end
+  opcodes[0x39] = function() return add_to_hl("reg.sp") end
 
   -- inc rr
   opcode_cycles[0x03] = 8
   opcodes[0x03] = function()
-    reg.set_bc(band(reg.bc() + 1, 0xFFFF))
+    return ("reg.set_bc(band(%s + 1, 0xFFFF))"):format(reg.bc())
   end
 
   opcode_cycles[0x13] = 8
   opcodes[0x13] = function()
-    reg.set_de(band(reg.de() + 1, 0xFFFF))
+    return ("reg.set_de(band(%s + 1, 0xFFFF))"):format(reg.de())
   end
 
   opcode_cycles[0x23] = 8
   opcodes[0x23] = function()
-    reg.set_hl(band(reg.hl() + 1, 0xFFFF))
+    return ("reg.set_hl(band(%s + 1, 0xFFFF))"):format(reg.hl())
   end
 
   opcode_cycles[0x33] = 8
   opcodes[0x33] = function()
-    reg.sp = band(reg.sp + 1, 0xFFFF)
+    return "reg.sp = band(reg.sp + 1, 0xFFFF)"
   end
 
   -- dec rr
   opcode_cycles[0x0B] = 8
   opcodes[0x0B] = function()
-    reg.set_bc(band(reg.bc() - 1, 0xFFFF))
+    return ("reg.set_bc(band(%s - 1, 0xFFFF))"):format(reg.bc())
   end
 
   opcode_cycles[0x1B] = 8
   opcodes[0x1B] = function()
-    reg.set_de(band(reg.de() - 1, 0xFFFF))
+    return ("reg.set_de(band(%s - 1, 0xFFFF))"):format(reg.de())
   end
 
   opcode_cycles[0x2B] = 8
   opcodes[0x2B] = function()
-    reg.set_hl(band(reg.hl() - 1, 0xFFFF))
+    return ("reg.set_hl(band(%s - 1, 0xFFFF))"):format(reg.hl())
   end
 
   opcode_cycles[0x3B] = 8
   opcodes[0x3B] = function()
-    reg.sp = band(reg.sp - 1, 0xFFFF)
+    return "reg.sp = band(reg.sp - 1, 0xFFFF)"
   end
 
   -- add SP, dd
   opcode_cycles[0xE8] = 16
   opcodes[0xE8] = function()
     local offset = read_nn()
+    return ([[do
+    local offset = %d
     -- offset comes in as unsigned 0-255, so convert it to signed -128 - 127
     if band(offset, 0x80) ~= 0 then
       offset = offset + 0xFF00
@@ -261,6 +258,7 @@ function apply(opcodes, opcode_cycles, z80, memory)
 
     flags.z = false
     flags.n = false
+  end ]]):format(offset)
   end
 end
 

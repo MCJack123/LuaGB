@@ -2,6 +2,7 @@
 --require = dofile(shell.dir() .. "/require.lua")
 --require.addPath(shell.dir())
 --require.addPath(fs.getDir(shell.dir()))
+--if term.getGraphicsMode == nil then error("This requires CraftOS-PC v1.2 or later.") end
 package.path = package.path .. ";?.lua;../?.lua;?/init.lua;../?/init.lua"
 
 if pcall(require, "jit.opt") then
@@ -208,28 +209,55 @@ function LuaGB:load_state(number)
     end
 end
 
-LuaGB.sound_buffer = {}
-LuaGB.speaker = peripheral.find("speaker")
+LuaGB.sound_buffer_left, LuaGB.sound_buffer_right = {}, {}
+local leftSpeaker, rightSpeaker
+if peripheral.getType("left") == "speaker" and peripheral.getType("right") == "speaker" then
+    leftSpeaker, rightSpeaker = peripheral.wrap("left"), peripheral.wrap("right")
+    if leftSpeaker.setPosition then leftSpeaker.setPosition(1, 0, 0) end
+    if rightSpeaker.setPosition then rightSpeaker.setPosition(-1, 0, 0) end
+    LuaGB.speaker = leftSpeaker
+else LuaGB.speaker = peripheral.find("speaker") end
 
 function LuaGB.play_gameboy_audio(buffer)
-    if not LuaGB.speaker or not LuaGB.speaker.playLocalMusic then return end -- ComputerCraft has no audio
-    LuaGB.sound_buffer[#LuaGB.sound_buffer+1] = buffer
-    if #LuaGB.sound_buffer >= 4 then
-        local file, err = io.open("LuaGBAudioTmp.wav", "wb")
-        if file == nil then print("Could not write audio: " .. (err or "nil")) return end
-        file:write("RIFF\36\64\0\0WAVEfmt \16\0\0\0\1\0\2\0\0\128\0\0\0\0\2\0\4\0\16\0data\0\64\0\0")
-        for j = 1, 4 do
-            for i = 0, 1023 do
-                local n = LuaGB.sound_buffer[j][i] * 32767
-                file:write(string.char(bit32.band(n, 0xFF)) .. string.char(bit32.band(bit32.rshift(n, 8), 0xFF)))
-            end
-        end
-        local n = LuaGB.sound_buffer[4][1023] * 32767
-        file:write((string.char(bit32.band(n, 0xFF)) .. string.char(bit32.band(bit32.rshift(n, 8), 0xFF))):rep(4096))
-        file:close()
-        LuaGB.speaker.playLocalMusic("LuaGBAudioTmp.wav")
-        LuaGB.sound_buffer = {}
+    if not LuaGB.speaker or not LuaGB.speaker.playAudio then return end -- ComputerCraft < 1.100 has no audio
+    local l = #LuaGB.sound_buffer_left
+    for i = 1, 750 do
+        LuaGB.sound_buffer_left[l+i] = buffer[math.floor((i-1)/1.46484375)*2] * 127
+        LuaGB.sound_buffer_right[l+i] = buffer[math.floor((i-1)/1.46484375)*2+1] * 127
     end
+    if #LuaGB.sound_buffer_left > 2400 then
+        if leftSpeaker then
+            leftSpeaker.playAudio(LuaGB.sound_buffer_left, 1)
+            rightSpeaker.playAudio(LuaGB.sound_buffer_right, 1)
+        else
+            local buf = {}
+            for i = 1, #LuaGB.sound_buffer_left do buf[i] = (LuaGB.sound_buffer_left[i] + LuaGB.sound_buffer_right[i]) / 2 end
+            LuaGB.speaker.stop()
+            LuaGB.speaker.playAudio(buf, 1)
+        end
+        LuaGB.sound_buffer_left, LuaGB.sound_buffer_right = {}, {}
+    end
+    --LuaGB.sound_buffer[#LuaGB.sound_buffer+1] = buffer
+    --if #LuaGB.sound_buffer >= 4 then
+        -- local file, err = io.open(audio_flip and "LuaGBAudioTmp2.wav" or "LuaGBAudioTmp1.wav", "wb")
+        -- if file == nil then print("Could not write audio: " .. (err or "nil")) return end
+        -- file:write("RIFF\36\32\0\0WAVEfmt \16\0\0\0\1\0\2\0\0\128\0\0\0\0\2\0\4\0\16\0data\0\32\0\0")
+        -- for j = 1, 4 do
+        --     for i = 0, 1023 do
+        --         --local n = LuaGB.sound_buffer[j][i] * 32767
+        --         local n = buffer[i] * 32767
+        --         file:write(string.char(bit32.band(n, 0xFF)) .. string.char(bit32.band(bit32.rshift(n, 8), 0xFF)))
+        --     end
+        -- end
+        --local n = LuaGB.sound_buffer[4][1023] * 32767
+        --file:write((string.char(bit32.band(n, 0xFF)) .. string.char(bit32.band(bit32.rshift(n, 8), 0xFF))):rep(4096))
+        -- file:close()
+        --LuaGB.speaker.playNote("hat")
+        --LuaGB.speaker.playLocalMusic(audio_flip and "LuaGBAudioTmp2.wav" or "LuaGBAudioTmp1.wav")
+        --LuaGB.sound_buffer = {}
+        --audio_flip = not audio_flip
+        --term.setPixel(200, 100, audio_flip and 11 or 10)
+    --end
     --print("Audio success")
 end
 
@@ -490,14 +518,14 @@ function LuaGB:draw_game_screen(dx, dy, scale)
             for i = 0, 2 do
                 colors[i*2+1] = self:get_color_for_rgb(pixels[y+i][x])
                 local found = false
-                for n,v in ipairs(used_colors) do if v == colors[i+1] then found = true break end end
-                if not found then used_colors[#used_colors+1] = colors[i+1] end
+                for n,v in ipairs(used_colors) do if v == colors[i*2+1] then found = true break end end
+                if not found then used_colors[#used_colors+1] = colors[i*2+1] end
             end
             for i = 0, 2 do
                 colors[i*2+2] = self:get_color_for_rgb(pixels[y+i][x+1])
                 local found = false
-                for n,v in ipairs(used_colors) do if v == colors[i+4] then found = true break end end
-                if not found then used_colors[#used_colors+1] = colors[i+4] end
+                for n,v in ipairs(used_colors) do if v == colors[i*2+2] then found = true break end end
+                if not found then used_colors[#used_colors+1] = colors[i*2+2] end
             end
             if #used_colors == 1 then
                 row[1] = row[1] .. " "
@@ -505,8 +533,8 @@ function LuaGB:draw_game_screen(dx, dy, scale)
                 row[3] = row[3] .. ("0123456789abcdef"):sub(used_colors[1]+1, used_colors[1]+1)
             elseif #used_colors == 2 then
                 local char, fg, bg = 128, used_colors[2], used_colors[1]
-                for i = 1, 5 do if colors[i] == used_colors[2] then char = char + 2^(i-1) end end
-                if colors[6] == used_colors[2] then char, fg, bg = bit32.band(bit32.bnot(char), 0x1F) + 128, bg, fg end
+                for i = 1, 5 do if colors[i] == fg then char = char + 2^(i-1) end end
+                if colors[6] == fg then char, fg, bg = bit32.band(bit32.bnot(char), 0x1F) + 128, bg, fg end
                 row[1] = row[1] .. string.char(char)
                 row[2] = row[2] .. ("0123456789abcdef"):sub(fg+1, fg+1)
                 row[3] = row[3] .. ("0123456789abcdef"):sub(bg+1, bg+1)
@@ -576,6 +604,9 @@ function LuaGB:draw_game_screen(dx, dy, scale)
     end
     --self:setPalette()
     win.setVisible(true)
+    term.setCursorPos(1, 49)
+    term.setBackgroundColor(colors.black)
+    term.setTextColor(colors.lightGray)
     --[[draw_calls = draw_calls + 1
     if math.floor(os.epoch("utc") / 1000) > lastFrameUpdate then
         lastFrameUpdate = math.floor(os.epoch("utc") / 1000)
@@ -598,9 +629,18 @@ function LuaGB:reset()
     self.gameboy = Gameboy.new{}
     self.gameboy:initialize()
     self.gameboy:reset()
+    --self.gameboy.audio.disabled = true
     self.gameboy.audio.on_buffer_full(self.play_gameboy_audio)
     self.audio_dump_running = false
     self.gameboy.graphics.palette_dmg_colors = palette
+    if sound then
+        for i = 1, 4 do sound.setVolume(i, 0) end
+        sound.setWaveType(1, "square")
+        sound.setWaveType(2, "square")
+        sound.setWaveType(3, "triangle")
+        sound.setWaveType(4, "noise")
+        sound.setFrequency(4, 1)
+    end
 
     -- Initialize Debug Panels
     --for _, panel in pairs(panels) do
@@ -717,7 +757,7 @@ function keyreleased(key)
     end
 
     if LuaGB.menu_active then
-        filebrowser.keyreleased(key)
+        --filebrowser.keyreleased(key)
     end
 
     if input_mappings[key] then
@@ -726,7 +766,7 @@ function keyreleased(key)
     end
 
     if key == "escape" and LuaGB.game_loaded then
-        LuaGB.menu_active = not LuaGB.menu_active
+        --LuaGB.menu_active = not LuaGB.menu_active
     end
 end
 
@@ -743,7 +783,7 @@ function mousepressed(x, y, button)
         scale = 2
     end
     if LuaGB.menu_active then
-        filebrowser.mousepressed(x / scale, y / scale, button)
+        --filebrowser.mousepressed(x / scale, y / scale, button)
     end
 end
 
@@ -835,11 +875,15 @@ function event_loop()
     end
 end
 
+local last_render = 0
 function update_loop()
     while true do
         os.pullEvent("update")
-        update()
-        draw()
+        if os.epoch("utc") - last_render >= 16 then
+            last_render = os.epoch("utc")
+            update()
+            draw()
+        end
         os.queueEvent("update")
     end
 end
@@ -852,3 +896,4 @@ term.setBackgroundColor(colors.black)
 term.setTextColor(colors.white)
 term.clear()
 term.setCursorPos(1, 1)
+if sound then for i = 1, 4 do sound.setVolume(i, 0) end end

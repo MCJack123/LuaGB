@@ -10,6 +10,7 @@ This is designed to be fairly cross platform, and currently consists of a platfo
 * Decently cycle-approximate graphics? Seems slow for now, working on fixing.
 * Multiple Palettes for DMG Mode
 * SRAM and Save States
+* Audio support through speakers (CC:T 1.100+)
 
 ## Notable Missing Features
 
@@ -18,8 +19,6 @@ This is designed to be fairly cross platform, and currently consists of a platfo
 * RTC Timer (Pokemon Gold / Crystal)
 * Key remapping, Gamepad support, etc
 * Movie Recording / Playback / TAS Features (planned)
-* Audio playback (can still record to file)
-  * Rudimentary audio support is available in CraftOS-PC v2.3 or later by attaching a speaker
 
 ## Run Instructions
 Download the repository, extract it to your ComputerCraft root.
@@ -47,7 +46,9 @@ I still have not implemented every cartridge type, and some more advanced featur
 
 Graphics output, though approaching cycle accuracy, is not perfect. It is close enough for games like Prehistorik Man to display their effects correctly, but some homebrew demos and a few commercial titles still have visual problems. Bug reports are very welcome here, as I simply don't have time in the day to test every game out there, and the small number of games I do have that are giving me obvious visual artifacts are proving difficult to debug.
 
-This runs *very* slowly in ComputerCraft and standard CraftOS-PC. You can get a large performance increase by running it in CraftOS-PC Accelerated.
+The JIT compiler for Z80 code hasn't been rigorously tested - while it seems to work on a select number of games, it hasn't been tested fully, so things may break.
+
+This runs somewhat slowly in ComputerCraft and standard CraftOS-PC. You can get a large performance increase by running it in CraftOS-PC Accelerated.
 
 The ComputerCraft interface is currently in beta, and requires an 80x48 monitor to run. Color accuracy may be affected due to the fact that no more than two colors can be in a 2x3 area. I've attempted to round the colors as best as possible, but the artifacts will still be noticeable. It also does not, and will never, support Game Boy Color games due to ComputerCraft not supporting even the base set of colors (56) that a GBC has.
 
